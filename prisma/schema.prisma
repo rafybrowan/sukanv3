@@ -1,0 +1,181 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// SUKAN RIVER TUBING - RESERVATION SYSTEM SCHEMA
+// ============================================================
+
+model Admin {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String // hashed (scrypt)
+  name      String
+  createdAt DateTime @default(now())
+}
+
+model Setting {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String
+}
+
+model Schedule {
+  id           String            @id @default(cuid())
+  date         String // YYYY-MM-DD
+  time         String // HH:mm
+  capacity     Int               @default(60)
+  status       String            @default("AKTIF") // AKTIF | DITUTUP | DITUNDA
+  createdAt    DateTime          @default(now())
+  reservations Reservation[]
+  groups       Group[]
+  guideAssignments GuideAssignment[]
+
+  @@unique([date, time])
+}
+
+model Reservation {
+  id                      String          @id @default(cuid())
+  reservationCode         String          @unique // SRT-YYMMDD-XXX
+  scheduleId              String
+  schedule                Schedule        @relation(fields: [scheduleId], references: [id])
+  name                    String
+  phone                   String
+  email                   String?
+  participantCount        Int
+  paymentParticipantCount Int
+  groupingOption          String // WAIT_GROUP | DEPART_NOW | COMPLETE
+  reservationStatus       String          @default("MENUNGGU_PEMBAYARAN") // MENUNGGU_PEMBAYARAN | TERKONFIRMASI | SELESAI | DIBATALKAN
+  groupingStatus          String // MENUNGGU_PENGELOMPOKAN | SIAP_BERANGKAT | KELOMPOK_LENGKAP | TERKELOMPOK
+  totalPrice              Int
+  actualParticipantCount  Int? // diisi admin saat konfirmasi peserta hari H
+  payment                 Payment?
+  groupMembers            GroupMember[]
+  changeRequests          ChangeRequest[]
+  createdAt               DateTime        @default(now())
+  updatedAt               DateTime        @updatedAt
+
+  @@index([scheduleId])
+  @@index([phone])
+}
+
+model Payment {
+  id              String           @id @default(cuid())
+  reservationId   String           @unique
+  reservation     Reservation      @relation(fields: [reservationId], references: [id])
+  paymentMethod   String // FULL_PAYMENT (Lunas) | ONSITE (Bayar di Tempat)
+  totalAmount     Int
+  amountPaid      Int              @default(0)
+  remainingAmount Int
+  paymentStatus   String           @default("UNPAID") // UNPAID (Belum Bayar) | PAID (Lunas)
+  transactionCode String? // PAY-YYMMDD-XXX
+  paidAt          DateTime?
+  history         PaymentHistory[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+}
+
+model PaymentHistory {
+  id              String   @id @default(cuid())
+  paymentId       String
+  payment         Payment  @relation(fields: [paymentId], references: [id])
+  amount          Int
+  type            String // FULL (Bayar Lunas) | ONSITE (Bayar di Tempat) | SETTLEMENT (Pelunasan)
+  transactionCode String?
+  note            String?
+  createdAt       DateTime @default(now())
+}
+
+model Group {
+  id              String              @id @default(cuid())
+  groupCode       String              @unique // GRP-XXX
+  scheduleId      String
+  schedule        Schedule            @relation(fields: [scheduleId], references: [id])
+  status          String              @default("MENUNGGU") // MENUNGGU | LENGKAP (dikonfirmasi) | SIAP_BERANGKAT (guide ditugaskan)
+  progressStatus  String              @default("NEW") // NEW | IN_PROGRESS | DONE (alur utama: Terbaru -> Sedang Diproses -> Selesai)
+  conditionStatus String              @default("NORMAL") // NORMAL | PENDING | OVERDUE (kondisi tambahan, tidak mengubah alur utama)
+  members         GroupMember[]
+  assignments     GuideAssignment[]
+  statusHistory   GroupStatusHistory[]
+  createdAt       DateTime            @default(now())
+}
+
+model GroupStatusHistory {
+  id              String   @id @default(cuid())
+  groupId         String
+  group           Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  changeType      String   @default("PROGRESS") // PROGRESS | CONDITION | EVENT
+  previousStatus  String? // null = status awal
+  newStatus       String
+  changedBy       String // nama admin atau "SISTEM"
+  note            String?
+  createdAt       DateTime @default(now())
+
+  @@index([groupId])
+}
+
+model GroupMember {
+  id               String      @id @default(cuid())
+  groupId          String
+  group            Group       @relation(fields: [groupId], references: [id])
+  reservationId    String      @unique
+  reservation      Reservation @relation(fields: [reservationId], references: [id])
+  participantCount Int
+}
+
+model ChangeRequest {
+  id              String      @id @default(cuid())
+  reservationId   String
+  reservation     Reservation @relation(fields: [reservationId], references: [id])
+  type            String // RESCHEDULE | PARTICIPANTS | CANCEL | OTHER
+  requestedChange String
+  reason          String?
+  status          String      @default("PENDING") // PENDING | APPROVED | REJECTED
+  adminNote       String?
+  createdAt       DateTime    @default(now())
+}
+
+// ============================================================
+// MODUL PEMANDU / GUIDE
+// ============================================================
+
+model Guide {
+  id          String            @id @default(cuid())
+  guideCode   String            @unique // G-001
+  name        String
+  phone       String
+  rate        Int               @default(100000) // tarif/honor per penugasan
+  status      String            @default("TERSEDIA") // TERSEDIA | DITUGASKAN | TIDAK_AKTIF
+  notes       String?
+  assignments GuideAssignment[]
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+}
+
+model GuideAssignment {
+  id               String    @id @default(cuid())
+  guideId          String
+  guide            Guide     @relation(fields: [guideId], references: [id])
+  groupId          String
+  group            Group     @relation(fields: [groupId], references: [id])
+  scheduleId       String
+  schedule         Schedule  @relation(fields: [scheduleId], references: [id])
+  assignmentDate   String // YYYY-MM-DD (denormalisasi dari schedule)
+  startTime        String // HH:mm (denormalisasi dari schedule)
+  participantCount Int // total peserta kelompok saat ditugaskan
+  rate             Int // honor dibekukan dari Guide.rate saat penugasan
+  assignmentStatus String    @default("DITUGASKAN") // BELUM_DITUGASKAN | DITUGASKAN | SELESAI | DIBATALKAN
+  paymentStatus    String    @default("BELUM_DIPROSES") // BELUM_DIPROSES | SIAP_DIBAYARKAN | SUDAH_DIBAYARKAN
+  assignedAt       DateTime  @default(now())
+  completedAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([guideId, scheduleId])
+  @@index([assignmentDate])
+}

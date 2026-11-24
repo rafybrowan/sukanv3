@@ -1,19 +1,9 @@
-# ============================================================
-# KONFIGURASI RAILWAY — Sukan River Tubing
-# Railway otomatis membaca file ini saat build dari GitHub.
-# ============================================================
-
 [build]
-builder = "NIXPACKS"
-buildCommand = "npx prisma generate && npm run build"
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
 
 [deploy]
-# Inisialisasi skema database (idempoten, aman untuk data yang sudah ada)
-# lalu jalankan server Next.js standalone.
-# Pada deploy PERTAMA, ganti sementara menjadi:
-#   npx prisma db push --skip-generate && npx tsx prisma/seed.ts && node .next/standalone/server.js
-startCommand = "npx prisma db push --skip-generate && node .next/standalone/server.js"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 3
 healthcheckPath = "/api/schedules"
-healthcheckTimeout = 30
+healthcheckTimeout = 100
